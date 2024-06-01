@@ -1,4 +1,3 @@
-
 const TELEGRAM_USER = require("./token.json");
 let ACCESS_TOKEN = TELEGRAM_USER.state.token;
 
@@ -176,6 +175,4 @@ async function getGoldDuckReward() {
 
     if (data.data.type === 0) {
       console.log(`${getCurrentTime()} - 🐙 Chúc bạn may mắn lần sau`);
-      getGoldDuckInfo();
-    } else {
-      claimGoldDuck
+      get
