@@ -1,21 +1,181 @@
-MIT License
 
-Copyright (c) 2022 Daniel Truong
+const TELEGRAM_USER = require("./token.json");
+let ACCESS_TOKEN = TELEGRAM_USER.state.token;
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+let listColect = [];
+let listDuck = [];
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Array.prototype.random = function () {
+  return this[Math.floor(Math.random() * this.length)];
+};
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+function getCurrentTime() {
+  const now = new Date();
+  return now.toLocaleString('vi-VN', { hour12: false });
+}
+
+async function fetchWithRetry(url, options, retries = 3, delay = 3000) {
+  try {
+    let response = await fetch(url, options);
+    let data = await response.json();
+    if (data.error_code !== "") console.log(`${getCurrentTime()} - ${data.error_code}`);
+    return data;
+  } catch (error) {
+    if (retries > 0) {
+      console.log(`${getCurrentTime()} - Mất kết nối ${url}, thử lại sau ${delay / 1000}s`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return fetchWithRetry(url, options, retries - 1, delay);
+    } else {
+      throw error;
+    }
+  }
+}
+
+async function getTotalEgg() {
+  try {
+    let data = await fetchWithRetry("https://api.quackquack.games/balance/get", {
+      headers: {
+        accept: "*/*",
+        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+        authorization: "Bearer " + ACCESS_TOKEN,
+      },
+      method: "GET",
+    });
+
+    console.log(`-----------------------------------`);
+    data.data.data.forEach((item) => {
+      if (item.symbol === "PET") console.log(`${getCurrentTime()} - Bạn đang có: ${item.balance} 🐸`);
+      if (item.symbol === "EGG") console.log(`${getCurrentTime()} - Bạn đang có: ${item.balance} 🥚`);
+    });
+    console.log(`-----------------------------------`);
+    getListCollectEgg();
+  } catch (error) {
+    console.error(`${getCurrentTime()} - Lỗi trong getTotalEgg:`, error);
+  }
+}
+
+async function getListCollectEgg() {
+  try {
+    listColect = [];
+    listDuck = [];
+
+    let data = await fetchWithRetry("https://api.quackquack.games/nest/list-reload", {
+      headers: {
+        accept: "*/*",
+        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+        authorization: "Bearer " + ACCESS_TOKEN,
+      },
+      method: "GET",
+    });
+
+    data.data.duck.forEach((item) => listDuck.push(item));
+    data.data.nest.forEach((item) => {
+      if (item.type_egg) listColect.push(item);
+    });
+
+    let eggs = listColect.map((i) => i.id);
+    if (listColect.length > 0) {
+      console.log(`${getCurrentTime()} - Số 🥚 có thể thu thập: ${listColect.length}`, eggs);
+      collect();
+    }
+  } catch (error) {
+    console.error(`${getCurrentTime()} - Lỗi trong getListCollectEgg:`, error);
+  }
+}
+
+async function collect() {
+  try {
+    if (listColect.length === 0) return getTotalEgg();
+
+    const egg = listColect[0];
+
+    let data = await fetchWithRetry("https://api.quackquack.games/nest/collect", {
+      headers: {
+        accept: "*/*",
+        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+        authorization: "Bearer " + ACCESS_TOKEN,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: "nest_id=" + egg.id,
+      method: "POST",
+    });
+
+    const duck = getDuckToLay();
+    layEgg(egg, duck);
+  } catch (error) {
+    console.error(`${getCurrentTime()} - Lỗi trong collect:`, error);
+  }
+}
+
+function getDuckToLay() {
+  return listDuck.reduce((minDuck, duck) => 
+    duck.last_active_time < minDuck.last_active_time ? duck : minDuck
+  );
+}
+
+async function layEgg(egg, duck) {
+  try {
+    let data = await fetchWithRetry("https://api.quackquack.games/nest/lay-egg", {
+      headers: {
+        accept: "*/*",
+        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+        authorization: "Bearer " + ACCESS_TOKEN,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: `nest_id=${egg.id}&duck_id=${duck.id}`,
+      method: "POST",
+    });
+
+    if (data.error_code !== "") {
+      const newDuck = getDuckToLay();
+      layEgg(egg, newDuck);
+    } else {
+      console.log(`${getCurrentTime()} - Đã thu thập 🥚 ${egg.id}`);
+      listColect.shift();
+      listDuck = listDuck.filter(d => d.id !== duck.id);
+      setTimeout(collect, 3000);
+    }
+  } catch (error) {
+    console.error(`${getCurrentTime()} - Lỗi trong layEgg:`, error);
+  }
+}
+
+async function getGoldDuckInfo() {
+  try {
+    let data = await fetchWithRetry("https://api.quackquack.games/golden-duck/info", {
+      headers: {
+        accept: "*/*",
+        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+        authorization: "Bearer " + ACCESS_TOKEN,
+      },
+      method: "GET",
+    });
+
+    if (data.data.time_to_golden_duck !== 0) {
+      let nextGoldDuck = data.data.time_to_golden_duck;
+      console.log(`${getCurrentTime()} - 🐙 ${Number(nextGoldDuck / 60).toFixed(0)} phút nữa gặp`);
+      setTimeout(getGoldDuckInfo, nextGoldDuck * 1000);
+    } else {
+      getGoldDuckReward();
+    }
+  } catch (error) {
+    console.error(`${getCurrentTime()} - Lỗi trong getGoldDuckInfo:`, error);
+  }
+}
+
+async function getGoldDuckReward() {
+  try {
+    let data = await fetchWithRetry("https://api.quackquack.games/golden-duck/reward", {
+      headers: {
+        accept: "*/*",
+        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+        authorization: "Bearer " + ACCESS_TOKEN,
+      },
+      method: "GET",
+    });
+
+    if (data.data.type === 0) {
+      console.log(`${getCurrentTime()} - 🐙 Chúc bạn may mắn lần sau`);
+      getGoldDuckInfo();
+    } else {
+      claimGoldDuck
